@@ -348,6 +348,8 @@ async function showNotification(
         return;
     }
 
+    /*let reminders = [];
+
     try {
         const response = await fetch("/api/reminders/all");
 
@@ -355,16 +357,16 @@ async function showNotification(
             throw new Error(`HTTP ${response.status}`);
         }
 
-        const reminders = await response.json();
+        reminders = await response.json();
 
-    } catch (error) {
-        console.error("Could not get reminders:", error);
-	const reminders = [];
-    }
+    cl(reminders);
+    cl(id);
 
-    const reminder = reminders.find(r => r.id === reminderId);
+    const reminder = reminders.find(r => r.id === id);
 
-    if (!reminder.triggered) {
+    cl(reminder);
+
+    if (!reminder.triggered) {*/
     	const notification =
     	    new Notification(
     	        "Reminder",
@@ -386,6 +388,10 @@ async function showNotification(
 	        notification.close();
 	    };
     }
+    /*} catch (error) {
+        console.error("Could not get reminders:", error);
+	reminders = [];
+    }*/
 }
 
 function showNotification1(
