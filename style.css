@@ -1,0 +1,366 @@
+root {
+	--delete-animation: wiggle 0.4s infinite linear;
+}
+
+body, html {
+	background: #000;
+	font-family: Arial;
+}
+
+.table {
+	height: fit-content;
+	width: 100%;
+	background: #777;
+}
+
+.table2 {
+	height: fit-content;
+	width: fit-content;
+	background: #777;
+	border-radius:20px;
+}
+
+.row, .column {
+	background: #222;
+	height: fit-content;
+	width:  50px;
+	border-radius: 5px;
+	transition: transform 0.3s linear;
+	
+}
+
+.row:hover, .column:hover {
+	background: #e43;
+	animation: var(--delete-animation);
+	transform: scale(1.1);
+}
+
+td {
+	color: white;
+	overflow: overlay;
+	height: fit-content;
+	width: fit-content;
+	text-align: center;
+	max-width: 75px;
+	min-width: 75px;
+	text-overflow: clip;
+	text-wrap: nowrap;
+	white-space: nowrap;
+	scrollbar-width: none;
+	padding: 0px 5px;
+	user-select:none;
+}
+
+.tbody {
+	width: 50px;
+}
+
+.table {
+	position: absolute;
+	top:  52px;
+	left: 108px;
+	height: fit-content;
+	width:  fit-content;
+	text-wrap: nowrap;
+}
+
+.addTable {
+	top: 90%;
+	left: 50%;
+	position: absolute;
+	height: 40px;
+	width:  40px;
+	background: #79f;
+	border-radius: 20%;
+	align-content: center;
+	text-align: center;
+	transform: translate(-50%, -50%);
+	transition: height 0.3s ease-out, width 0.3s ease-out, border-radius 0.3s ease-out;
+}
+
+.addTable:hover {
+	height: 50px;
+	width: 50px;
+	border-radius: 50%;
+}
+
+.addTableAfter {
+	font-size: 35px;
+	content: "+";
+	text-align: center;
+	color: #111;
+	transition: transform 0.3s ease;
+	user-select: none;
+}
+
+.tableSettings {
+	height: 70%;
+	width: 50%;
+	position: absolute;
+	top: 45%;
+	left: 50%;
+	background: #555;
+	transform: translate(-50%, -45%);
+	border-radius: 5%;
+}
+
+.settingsLabel {
+	text-align: center;
+	position: relative;
+	left: 50%;
+	transform: translate(-50%, -50%);
+	font-size: 30px;
+	font-family: Arial;
+}
+
+.hidden {
+	display: none;
+}
+
+#labels {
+	position: relative;
+	left: 50%;
+	transform: translateX(-50%);
+}
+
+.td2 {
+	overflow: overlay;
+	background: #222;
+	height: fit-content;
+	width: fit-content;
+	text-align: center;
+	max-width: 200px;
+	text-overflow: clip;
+	text-wrap: nowrap;
+	white-space: nowrap;
+	scrollbar-width: none;
+	padding: 0px 5px;
+}
+
+.table1 {
+	height: fit-content;
+	max-height: 100px;
+	overflow-y: scroll;
+	width: fit-content;
+	background: #777;
+}
+
+.row2 {
+	background: #222;
+	height: fit-content;
+	width:  400px;
+	max-width: 400px;
+	padding: 5px;
+}
+
+#tablelabel {
+	background: #222;
+	position: relative;
+	left: 50%;
+	top: -2%;
+	transform: translate(-50%, -50%);
+	color: white;
+	border-radius: 5px;
+	border-width: 1px;
+	border-color: #222;
+}
+
+.subtractRow {
+	top: 45%;
+	left: 50%;
+	position: absolute;
+	height: 15px;
+	width:  15px;
+	background: #f79;
+	border-radius: 15%;
+	align-content: center;
+	text-align: center;
+	transform: translate(-50%, -50%);
+}
+
+.subtractRow::after {
+	font-size: 15px;
+	content: "-";
+	text-align: center;
+	color: #111;
+}
+
+#confirmTable {
+	top: 90%;
+	left: 50%;
+	position: fixed;
+	height: 40px;
+	width:  70px;
+	background: #79f;
+	border-radius: 15%;
+	align-content: center;
+	text-align: center;
+	transform: translate(-50%, -50%);
+}
+
+#confirmTable::after {
+	font-size: 15px;
+	content: "Confirm";
+	text-align: center;
+	color: #111;
+}
+
+.yearDiv {
+	color: #88aaff;
+	font-size: 40px;
+	position: fixed;
+	top: 3px;
+	left: 50%;
+	transform: translateX(-50%);
+	font-family: monospace;
+	text-wrap: nowrap;
+	transition: font-size 0.3s ease-out;
+}
+
+#tableContainer {
+	overflow-y: scroll;
+	max-height: 35%;
+	scrollbar-color: black #555;
+}
+
+#timeInput {
+	position: fixed;
+	top: 75%;
+	left: 50%;
+	transform: translateX(-50%);
+	background: #777;
+}
+
+.timeRow {
+	background: #444;
+	height: 30px;
+}
+
+.timeRow:hover {
+	background: #e43;
+	animation: wiggle 0.4s infinite linear;
+	transform: scale(1.1);
+}
+
+.timeRow td {
+	color: #88aaff;
+	font-weight: bold;
+	min-width: 75px;
+}
+
+.confirm, .reject {
+	height: 20px;
+	width: 60px;
+	text-align: center;
+	align-content: center;
+	border-radius: 5px;
+	font-family: monospace;
+	font-size: 16px;
+	font-weight: bolder;
+	position: relative;
+	user-select: none;
+}
+
+#confirmDelete {
+	height: 15%;
+	width: 50%;
+	background: #777;
+	position: absolute;
+	top: 50%;
+	left: 50%;
+	transform: translate(-50%, -50%);
+	border-radius: 20px;
+	border: #eee 3px solid;
+	align-content: center;
+	text-align: center;
+}
+
+.confirm {
+	top: 30%;
+	left: 67%;
+	background: #ff0000;
+}
+
+.reject {
+	top: 13.5%;
+	left: 17%;
+	background: #00ff00;
+}
+
+.reject:hover {
+	background: #88ff88;
+}
+
+.confirm:hover {
+	background: #ff8888;
+}
+
+@keyframes wiggle {
+	0%   {transform: rotate(0deg) scale(1.1);}
+	25%  {transform: rotate(3deg) scale(1.1);}
+	75%  {transform: rotate(-3deg) scale(1.1);}
+	100% {transform: rotate(0deg) scale(1.1);}
+}
+
+@keyframes ringing {
+	0%   {transform: rotate(0deg) scale(1.7);  background: red;}
+	10%  {transform: rotate(20deg) scale(1.7);  background: orange;}
+	20%  {transform: rotate(-20deg) scale(1.7); background: yellow;}
+	30%  {transform: rotate(20deg) scale(1.7);  background: green;}
+	40%  {transform: rotate(-20deg) scale(1.7);  background: blue;}
+	50%  {transform: rotate(20deg) scale(1.7);  background: red;}
+	60%  {transform: rotate(-20deg) scale(1.7);  background: red;}
+	70%  {transform: rotate(20deg) scale(1.7);  background: orange;}
+	80%  {transform: rotate(-20deg) scale(1.7); background: yellow;}
+	90%  {transform: rotate(20deg) scale(1.7);  background: green;}
+	100% {transform: rotate(0deg) scale(1.7);  background: blue;}
+}
+
+@keyframes ringing2 {
+	0%   {background: red; transform: scale(1);}
+	20%  {background: orange; transform: scale(1);}
+	40%  {background: yellow; transform: scale(1);}
+	60%  {background: green; transform: scale(1);}
+	80%  {background: blue; transform: scale(1);}
+	90%  {background: purple; transform: scale(1);}
+	100% {background: red; transform: scale(1);}
+}
+
+.uhOh {
+	color: white;
+	font-family: Arial;
+	text-align: center;
+	align-items: center;
+	font-size: 50px;
+}
+
+.uhOh p {
+	font-size: 30px;
+}
+
+@media (max-width: 600px) {
+	.addTable {
+		height: 80px;
+		width: 80px;
+		border-radius: 100%;
+	}
+	
+	.yearDiv {
+		font-size: 50px;
+		text-wrap: nowrap;
+	}
+
+	tbody, table {
+		width: fit-content;
+		
+	}
+
+	tbody table {
+		max-width: 600px;
+	}
+}
+
+
+
+
+			

@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html lang="en">
+	<head>
+		<title>Reminders</title>
+		<link rel="stylesheet" href="style.css">
+	</head>
+	<body>
+		<div class="yearDiv" id="year"></div>
+
+		<div class="addTable" id="newTableButton">
+			<div class="addTableAfter">+</div>
+		</div>
+
+		<div class="tableSettings hidden" id="tableSettings">
+			<p class="settingsLabel">New Table</p>
+			<input id="tablelabel">
+			<div id="tableContainer">
+				<table class="table1" id="labels">
+					<tbody>
+					</tbody>
+				</table>
+			</div>
+			<input type="time" id="timeInput" name="appt-time">
+			<div id="confirmTable"></div>
+		</div>
+
+		<div id="table">
+		</div>
+
+		<div id="confirmDelete" class="hidden">
+			Are you sure you want to delete this?
+			<div class="confirm">Delete</div>
+			<div class="reject">Cancel</div>
+		</div>
+		
+		<script src="/sw.js"></script>
+		<script src="functionsAndDeclarations.js"></script>
+		<script src="client.js"></script>
+	</body>
+</html>
