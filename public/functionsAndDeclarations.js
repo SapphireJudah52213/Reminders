@@ -387,8 +387,8 @@ async function showNotification(
 	        window.focus();
 	        notification.close();
 	    };
-    }
-    /*} catch (error) {
+    /*}
+    } catch (error) {
         console.error("Could not get reminders:", error);
 	reminders = [];
     }*/
