@@ -2,542 +2,691 @@ const express = require("express");
 const http = require("http");
 const { Server } = require("socket.io");
 const webpush = require("web-push");
-const fs = require("fs");
-const path = require("path");
 const crypto = require("crypto");
+const { Pool } = require("pg");
 
 const app = express();
 const server = http.createServer(app);
 
 const io = new Server(server, {
-	transports: ["polling", "websocket"],
-	pingInterval: 25000,
-	pingTimeout: 60000,
-	connectTimeout: 20000,
-	maxHttpBufferSize: 1e6
+    transports: ["polling", "websocket"],
+    pingInterval: 25000,
+    pingTimeout: 60000,
+    connectTimeout: 20000,
+    maxHttpBufferSize: 1e6
 });
 
-const PORT = 10001;
-const DATA_FILE = path.join(__dirname, "reminders.json");
-const PUBLIC_DIR = path.join(__dirname, "public");
+const PORT = process.env.PORT || 10001;
 
-const VAPID_PUBLIC_KEY =
-	process.env.VAPID_PUBLIC_KEY;
-
-const VAPID_PRIVATE_KEY =
-	process.env.VAPID_PRIVATE_KEY;
+const VAPID_PUBLIC_KEY = process.env.VAPID_PUBLIC_KEY;
+const VAPID_PRIVATE_KEY = process.env.VAPID_PRIVATE_KEY;
+const DATABASE_URL = process.env.DATABASE_URL;
 
 if (!VAPID_PUBLIC_KEY || !VAPID_PRIVATE_KEY) {
-	console.error(
-		"Missing VAPID_PUBLIC_KEY or VAPID_PRIVATE_KEY."
-	);
+    console.error("Missing VAPID_PUBLIC_KEY or VAPID_PRIVATE_KEY.");
+    process.exit(1);
+}
 
-	console.error(
-		"Set both environment variables before starting the server."
-	);
-
-	process.exit(1);
+if (!DATABASE_URL) {
+    console.error("Missing DATABASE_URL.");
+    process.exit(1);
 }
 
 webpush.setVapidDetails(
-	"mailto:judahsiegal52213@gmail.com",
-	VAPID_PUBLIC_KEY,
-	VAPID_PRIVATE_KEY
+    "mailto:judahsiegal52213@gmail.com",
+    VAPID_PUBLIC_KEY,
+    VAPID_PRIVATE_KEY
 );
+
+const pool = new Pool({
+    connectionString: DATABASE_URL,
+    ssl: DATABASE_URL.includes("localhost")
+        ? false
+        : { rejectUnauthorized: false }
+});
 
 app.use(express.json());
+app.use(express.static("public"));
 
-app.use(
-	express.static(PUBLIC_DIR)
-);
+async function initializeDatabase() {
+    await pool.query(`
+        CREATE TABLE IF NOT EXISTS reminders (
+            id UUID PRIMARY KEY,
+            time TEXT NOT NULL,
+            rows JSONB NOT NULL,
+            created_at BIGINT NOT NULL,
+            triggered BOOLEAN NOT NULL DEFAULT FALSE,
+            triggered_at BIGINT
+        )
+    `);
 
-let subscriptions = [];
-let reminders = [];
+    await pool.query(`
+        CREATE TABLE IF NOT EXISTS subscriptions (
+            id SERIAL PRIMARY KEY,
+            endpoint TEXT UNIQUE NOT NULL,
+            p256dh TEXT NOT NULL,
+            auth TEXT NOT NULL,
+            expiration_time BIGINT,
+            created_at BIGINT NOT NULL
+        )
+    `);
 
-function loadData() {
-	if (!fs.existsSync(DATA_FILE)) {
-		saveData();
-		return;
-	}
-
-	try {
-		const data = JSON.parse(
-			fs.readFileSync(
-				DATA_FILE,
-				"utf8"
-			)
-		);
-
-		subscriptions =
-			Array.isArray(data.subscriptions)
-				? data.subscriptions
-				: [];
-
-		reminders =
-			Array.isArray(data.reminders)
-				? data.reminders
-				: [];
-	} catch (error) {
-		console.error(
-			"Could not load reminders.json:",
-			error
-		);
-
-		subscriptions = [];
-		reminders = [];
-	}
-}
-
-function saveData() {
-	try {
-		fs.writeFileSync(
-			DATA_FILE,
-			JSON.stringify(
-				{
-					subscriptions,
-					reminders
-				},
-				null,
-				2
-			)
-		);
-	} catch (error) {
-		console.error(
-			"Could not save reminders.json:",
-			error
-		);
-	}
+    console.log("PostgreSQL database initialized.");
 }
 
 function createId() {
-	return crypto.randomUUID();
+    return crypto.randomUUID();
 }
 
-function removeSubscription(endpoint) {
-	subscriptions =
-		subscriptions.filter(
-			subscription =>
-				subscription.endpoint !== endpoint
-		);
+async function getSubscriptions() {
+    const result = await pool.query(`
+        SELECT
+            endpoint,
+            p256dh,
+            auth,
+            expiration_time
+        FROM subscriptions
+    `);
 
-	saveData();
+    return result.rows.map(row => ({
+        endpoint: row.endpoint,
+        expirationTime: row.expiration_time,
+        keys: {
+            p256dh: row.p256dh,
+            auth: row.auth
+        }
+    }));
+}
+
+async function getReminders(includeTriggered = false) {
+    const query = includeTriggered
+        ? `
+            SELECT
+                id,
+                time,
+                rows,
+                created_at,
+                triggered,
+                triggered_at
+            FROM reminders
+            ORDER BY time
+        `
+        : `
+            SELECT
+                id,
+                time,
+                rows,
+                created_at,
+                triggered,
+                triggered_at
+            FROM reminders
+            WHERE triggered = FALSE
+            ORDER BY time
+        `;
+
+    const result = await pool.query(query);
+
+    return result.rows.map(row => ({
+        id: row.id,
+        time: row.time,
+        rows: row.rows,
+        createdAt: Number(row.created_at),
+        triggered: row.triggered,
+        triggeredAt: row.triggered_at
+            ? Number(row.triggered_at)
+            : undefined
+    }));
+}
+
+async function removeSubscription(endpoint) {
+    await pool.query(
+        "DELETE FROM subscriptions WHERE endpoint = $1",
+        [endpoint]
+    );
 }
 
 async function sendPush(payload) {
-	const message =
-		JSON.stringify(payload);
+    const subscriptions = await getSubscriptions();
 
-	for (
-		const subscription
-		of [...subscriptions]
-	) {
-		try {
-			await webpush.sendNotification(
-				subscription,
-				message
-			);
+    if (subscriptions.length === 0) {
+        console.log("No push subscriptions registered.");
+        return {
+            sent: 0,
+            failed: 0
+        };
+    }
 
-			console.log(
-				"Push notification sent."
-			);
-		} catch (error) {
-			if (
-				error.statusCode === 404 ||
-				error.statusCode === 410
-			) {
-				console.log(
-					"Removing expired push subscription."
-				);
+    const message = JSON.stringify(payload);
 
-				removeSubscription(
-					subscription.endpoint
-				);
-			} else {
-				console.error(
-					"Push notification error:",
-					error
-				);
-			}
-		}
-	}
+    let sent = 0;
+    let failed = 0;
+
+    for (const subscription of subscriptions) {
+        try {
+            await webpush.sendNotification(
+                subscription,
+                message
+            );
+
+            sent++;
+            console.log("Push notification sent.");
+        } catch (error) {
+            failed++;
+
+            console.error(
+                "Push notification error:",
+                error
+            );
+
+            if (
+                error.statusCode === 404 ||
+                error.statusCode === 410
+            ) {
+                console.log(
+                    "Removing expired push subscription."
+                );
+
+                await removeSubscription(
+                    subscription.endpoint
+                );
+            }
+        }
+    }
+
+    return {
+        sent,
+        failed
+    };
 }
 
-app.get(
-	"/api/vapid-public-key",
-	(req, res) => {
-		res.json({
-			publicKey:
-				VAPID_PUBLIC_KEY
-		});
-	}
-);
+app.get("/api/vapid-public-key", (req, res) => {
+    res.json({
+        publicKey: VAPID_PUBLIC_KEY
+    });
+});
 
-app.post(
-	"/api/subscribe",
-	(req, res) => {
-		const subscription =
-			req.body;
+app.post("/api/subscribe", async (req, res) => {
+    try {
+        const subscription = req.body;
 
-		if (
-			!subscription ||
-			typeof subscription.endpoint !==
-				"string" ||
-			!subscription.keys ||
-			typeof subscription.keys.p256dh !==
-				"string" ||
-			typeof subscription.keys.auth !==
-				"string"
-		) {
-			return res.status(400).json({
-				error:
-					"Invalid push subscription"
-			});
-		}
+        if (
+            !subscription ||
+            typeof subscription.endpoint !== "string" ||
+            !subscription.keys ||
+            typeof subscription.keys.p256dh !== "string" ||
+            typeof subscription.keys.auth !== "string"
+        ) {
+            return res.status(400).json({
+                error: "Invalid push subscription"
+            });
+        }
 
-		const alreadyExists =
-			subscriptions.some(
-				existing =>
-					existing.endpoint ===
-					subscription.endpoint
-			);
+        await pool.query(
+            `
+            INSERT INTO subscriptions (
+                endpoint,
+                p256dh,
+                auth,
+                expiration_time,
+                created_at
+            )
+            VALUES ($1, $2, $3, $4, $5)
+            ON CONFLICT (endpoint)
+            DO UPDATE SET
+                p256dh = EXCLUDED.p256dh,
+                auth = EXCLUDED.auth,
+                expiration_time = EXCLUDED.expiration_time
+            `,
+            [
+                subscription.endpoint,
+                subscription.keys.p256dh,
+                subscription.keys.auth,
+                subscription.expirationTime
+                    ? Number(subscription.expirationTime)
+                    : null,
+                Date.now()
+            ]
+        );
 
-		if (!alreadyExists) {
-			subscriptions.push(
-				subscription
-			);
+        console.log(
+            "New push subscription registered."
+        );
 
-			saveData();
+        res.json({
+            success: true
+        });
+    } catch (error) {
+        console.error(
+            "Could not save push subscription:",
+            error
+        );
 
-			console.log(
-				"New push subscription registered."
-			);
-		}
+        res.status(500).json({
+            success: false,
+            error: error.message
+        });
+    }
+});
 
-		res.json({
-			success: true
-		});
-	}
-);
+app.delete("/api/subscribe", async (req, res) => {
+    try {
+        const endpoint = req.body?.endpoint;
 
-app.delete(
-	"/api/subscribe",
-	(req, res) => {
-		const endpoint =
-			req.body?.endpoint;
+        if (typeof endpoint !== "string") {
+            return res.status(400).json({
+                error: "Invalid subscription endpoint"
+            });
+        }
 
-		if (
-			typeof endpoint !==
-			"string"
-		) {
-			return res.status(400).json({
-				error:
-					"Invalid subscription endpoint"
-			});
-		}
+        await removeSubscription(endpoint);
 
-		removeSubscription(
-			endpoint
-		);
+        res.json({
+            success: true
+        });
+    } catch (error) {
+        console.error(
+            "Could not delete push subscription:",
+            error
+        );
 
-		res.json({
-			success: true
-		});
-	}
-);
+        res.status(500).json({
+            success: false,
+            error: error.message
+        });
+    }
+});
 
-app.post(
-	"/api/reminders",
-	(req, res) => {
-		const {
-			time,
-			rows
-		} = req.body;
+app.post("/api/reminders", async (req, res) => {
+    try {
+        const { time, rows } = req.body;
 
-		if (
-			typeof time !==
-				"string" ||
-			!/^\d{2}:\d{2}$/.test(
-				time
-			) ||
-			!Array.isArray(rows) ||
-			rows.length === 0
-		) {
-			return res.status(400).json({
-				error:
-					"Invalid reminder"
-			});
-		}
+        if (
+            typeof time !== "string" ||
+            !/^\d{2}:\d{2}$/.test(time) ||
+            !Array.isArray(rows) ||
+            rows.length === 0
+        ) {
+            return res.status(400).json({
+                error: "Invalid reminder"
+            });
+        }
 
-		const reminder = {
-			id: createId(),
-			time,
-			rows,
-			createdAt:
-				Date.now(),
-			triggered: false
-		};
+        const reminder = {
+            id: createId(),
+            time,
+            rows,
+            createdAt: Date.now(),
+            triggered: false
+        };
 
-		reminders.push(
-			reminder
-		);
+        await pool.query(
+            `
+            INSERT INTO reminders (
+                id,
+                time,
+                rows,
+                created_at,
+                triggered
+            )
+            VALUES ($1, $2, $3::jsonb, $4, $5)
+            `,
+            [
+                reminder.id,
+                reminder.time,
+                JSON.stringify(reminder.rows),
+                reminder.createdAt,
+                false
+            ]
+        );
 
-		saveData();
+        io.emit(
+            "reminder-created",
+            reminder
+        );
 
-		io.emit(
-			"reminder-created",
-			reminder
-		);
+        res.json(reminder);
+    } catch (error) {
+        console.error(
+            "Could not create reminder:",
+            error
+        );
 
-		res.json(
-			reminder
-		);
-	}
-);
+        res.status(500).json({
+            success: false,
+            error: error.message
+        });
+    }
+});
 
-app.get(
-	"/api/reminders",
-	(req, res) => {
-		res.json(
-			reminders.filter(
-				reminder =>
-					!reminder.triggered
-			)
-		);
-	}
-);
+app.get("/api/reminders", async (req, res) => {
+    try {
+        const reminders =
+            await getReminders(false);
 
-app.get(
-	"/api/reminders/all",
-	(req, res) => {
-		res.json(
-			reminders
-		);
-	}
-);
+        res.json(reminders);
+    } catch (error) {
+        console.error(
+            "Could not get reminders:",
+            error
+        );
 
-app.delete(
-	"/api/reminders/:id",
-	(req, res) => {
-		const id =
-			req.params.id;
+        res.status(500).json({
+            error: error.message
+        });
+    }
+});
 
-		const oldLength =
-			reminders.length;
+app.get("/api/reminders/all", async (req, res) => {
+    try {
+        const reminders =
+            await getReminders(true);
 
-		reminders =
-			reminders.filter(
-				reminder =>
-					reminder.id !== id
-			);
+        res.json(reminders);
+    } catch (error) {
+        console.error(
+            "Could not get all reminders:",
+            error
+        );
 
-		if (
-			reminders.length !==
-			oldLength
-		) {
-			saveData();
+        res.status(500).json({
+            error: error.message
+        });
+    }
+});
 
-			io.emit(
-				"reminder-deleted",
-				id
-			);
-		}
+app.delete("/api/reminders/:id", async (req, res) => {
+    try {
+        const id = req.params.id;
 
-		res.json({
-			success: true
-		});
-	}
-);
+        const result = await pool.query(
+            `
+            DELETE FROM reminders
+            WHERE id = $1
+            `,
+            [id]
+        );
 
-app.delete(
-	"/api/reminders",
-	(req, res) => {
-		reminders = [];
+        if (result.rowCount > 0) {
+            io.emit(
+                "reminder-deleted",
+                id
+            );
+        }
 
-		saveData();
+        res.json({
+            success: true
+        });
+    } catch (error) {
+        console.error(
+            "Could not delete reminder:",
+            error
+        );
 
-		io.emit(
-			"reminders-cleared"
-		);
+        res.status(500).json({
+            success: false,
+            error: error.message
+        });
+    }
+});
 
-		res.json({
-			success: true
-		});
-	}
-);
+app.delete("/api/reminders", async (req, res) => {
+    try {
+        await pool.query(
+            "DELETE FROM reminders"
+        );
 
-app.get(
-	"/api/status",
-	(req, res) => {
-		res.json({
-			online: true,
-			subscriptions:
-				subscriptions.length,
-			reminders:
-				reminders.filter(
-					reminder =>
-						!reminder.triggered
-				).length,
-			totalReminders:
-				reminders.length
-		});
-	}
-);
+        io.emit(
+            "reminders-cleared"
+        );
 
-io.on(
-	"connection",
-	socket => {
-		console.log(
-			"Client connected:",
-			socket.id
-		);
+        res.json({
+            success: true
+        });
+    } catch (error) {
+        console.error(
+            "Could not clear reminders:",
+            error
+        );
 
-		socket.emit(
-			"reminders",
-			reminders.filter(
-				reminder =>
-					!reminder.triggered
-			)
-		);
+        res.status(500).json({
+            success: false,
+            error: error.message
+        });
+    }
+});
 
-		socket.on(
-			"disconnect",
-			() => {
-				console.log(
-					"Client disconnected:",
-					socket.id
-				);
-			}
-		);
-	}
-);
+app.get("/api/status", async (req, res) => {
+    try {
+        const subscriptionResult =
+            await pool.query(
+                "SELECT COUNT(*) FROM subscriptions"
+            );
+
+        const reminderResult =
+            await pool.query(
+                `
+                SELECT
+                    COUNT(*) FILTER (
+                        WHERE triggered = FALSE
+                    ) AS active,
+                    COUNT(*) AS total
+                FROM reminders
+                `
+            );
+
+        res.json({
+            online: true,
+            subscriptions: Number(
+                subscriptionResult.rows[0].count
+            ),
+            reminders: Number(
+                reminderResult.rows[0].active
+            ),
+            totalReminders: Number(
+                reminderResult.rows[0].total
+            )
+        });
+    } catch (error) {
+        console.error(
+            "Could not get server status:",
+            error
+        );
+
+        res.status(500).json({
+            online: false,
+            error: error.message
+        });
+    }
+});
+
+app.post("/api/test-push", async (req, res) => {
+    try {
+        const result = await sendPush({
+            type: "test",
+            id: createId(),
+            title: "Push Test",
+            body: "Web Push is working.",
+            time: null,
+            rows: []
+        });
+
+        res.json({
+            success:
+                result.sent > 0 &&
+                result.failed === 0,
+            ...result
+        });
+    } catch (error) {
+        console.error(
+            "Test push failed:",
+            error
+        );
+
+        res.status(500).json({
+            success: false,
+            error: error.message
+        });
+    }
+});
+
+io.on("connection", async socket => {
+    console.log(
+        "Client connected:",
+        socket.id
+    );
+
+    try {
+        const reminders =
+            await getReminders(false);
+
+        socket.emit(
+            "reminders",
+            reminders
+        );
+    } catch (error) {
+        console.error(
+            "Could not send reminders to client:",
+            error
+        );
+    }
+
+    socket.on("disconnect", () => {
+        console.log(
+            "Client disconnected:",
+            socket.id
+        );
+    });
+});
 
 async function checkReminders() {
-	const now =
-		new Date();
+    try {
+        const now = new Date();
 
-	const currentHour =
-		now.getHours();
+        const currentHour =
+            now.getHours();
 
-	const currentMinute =
-		now.getMinutes();
+        const currentMinute =
+            now.getMinutes();
 
-	for (
-		const reminder
-		of reminders
-	) {
-		if (
-			reminder.triggered
-		) {
-			continue;
-		}
+        const currentTime =
+            String(currentHour).padStart(2, "0") +
+            ":" +
+            String(currentMinute).padStart(2, "0");
 
-		if (
-			typeof reminder.time !==
-			"string"
-		) {
-			continue;
-		}
+        const result = await pool.query(
+            `
+            SELECT
+                id,
+                time,
+                rows,
+                created_at,
+                triggered,
+                triggered_at
+            FROM reminders
+            WHERE triggered = FALSE
+              AND time = $1
+            `,
+            [currentTime]
+        );
 
-		const parts =
-			reminder.time.split(
-				":"
-			);
+        for (const row of result.rows) {
+            const reminder = {
+                id: row.id,
+                time: row.time,
+                rows: row.rows,
+                createdAt: Number(row.created_at),
+                triggered: true,
+                triggeredAt: Date.now()
+            };
 
-		if (
-			parts.length !== 2
-		) {
-			continue;
-		}
+            await pool.query(
+                `
+                UPDATE reminders
+                SET
+                    triggered = TRUE,
+                    triggered_at = $2
+                WHERE id = $1
+                  AND triggered = FALSE
+                `,
+                [
+                    reminder.id,
+                    reminder.triggeredAt
+                ]
+            );
 
-		const hour =
-			Number(parts[0]);
+            const body = reminder.rows
+                .map(row => {
+                    if (typeof row === "string") {
+                        return row;
+                    }
 
-		const minute =
-			Number(parts[1]);
+                    return row?.text || "";
+                })
+                .filter(Boolean)
+                .join("\n");
 
-		if (
-			!Number.isInteger(hour) ||
-			!Number.isInteger(minute)
-		) {
-			continue;
-		}
+            await sendPush({
+                type: "reminder",
+                id: reminder.id,
+                title: "Reminder",
+                body:
+                    body ||
+                    "Your reminder is due.",
+                time: reminder.time,
+                rows: reminder.rows
+            });
 
-		if (
-			hour !== currentHour ||
-			minute !== currentMinute
-		) {
-			continue;
-		}
+            io.emit(
+                "reminder-triggered",
+                reminder
+            );
 
-		reminder.triggered =
-			true;
-
-		reminder.triggeredAt =
-			Date.now();
-
-		saveData();
-
-		const body =
-			reminder.rows
-				.map(row => {
-					if (
-						typeof row ===
-						"string"
-					) {
-						return row;
-					}
-
-					return row?.text ||
-						"";
-				})
-				.filter(Boolean)
-				.join("\n");
-
-		await sendPush({
-			type: "reminder",
-			id: reminder.id,
-			title: "Reminder",
-			body:
-				body ||
-				"Your reminder is due.",
-			time:
-				reminder.time,
-			rows:
-				reminder.rows
-		});
-
-		io.emit(
-			"reminder-triggered",
-			reminder
-		);
-	}
+            console.log(
+                `Reminder triggered: ${reminder.id}`
+            );
+        }
+    } catch (error) {
+        console.error(
+            "Error checking reminders:",
+            error
+        );
+    }
 }
 
-loadData();
+async function startServer() {
+    try {
+        await initializeDatabase();
 
-setInterval(
-	checkReminders,
-	1000
-);
+        server.listen(
+            PORT,
+            "0.0.0.0",
+            () => {
+                console.log(
+                    `Reminders server running on port ${PORT}`
+                );
 
-server.listen(
-	PORT,
-	"0.0.0.0",
-	() => {
-		console.log(
-			`Reminders server running on http://localhost:${PORT}`
-		);
+                console.log(
+                    "PostgreSQL storage enabled."
+                );
 
-		console.log(
-			`Loaded ${reminders.length} reminders`
-		);
+                console.log(
+                    "Service Worker: /sw.js"
+                );
+            }
+        );
 
-		console.log(
-			`Loaded ${subscriptions.length} push subscriptions`
-		);
+        setInterval(
+            checkReminders,
+            1000
+        );
+    } catch (error) {
+        console.error(
+            "Could not start server:",
+            error
+        );
 
-		console.log(
-			`Service Worker: http://localhost:${PORT}/sw.js`
-		);
-	}
-);
+        process.exit(1);
+    }
+}
+
+startServer();
